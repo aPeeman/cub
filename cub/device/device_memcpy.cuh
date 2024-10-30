@@ -39,7 +39,6 @@
 #  pragma system_header
 #endif // no system header
 
-#include <cub/detail/nvtx.cuh>
 #include <cub/device/dispatch/dispatch_batch_memcpy.cuh>
 
 #include <cstdint>
@@ -164,16 +163,14 @@ struct DeviceMemcpy
   //!   **[optional]** CUDA stream to launch kernels within. Default is stream\ :sub:`0`.
   //!   @endrst
   template <typename InputBufferIt, typename OutputBufferIt, typename BufferSizeIteratorT>
-  CUB_RUNTIME_FUNCTION static cudaError_t Batched(
-    void* d_temp_storage,
-    size_t& temp_storage_bytes,
-    InputBufferIt input_buffer_it,
-    OutputBufferIt output_buffer_it,
-    BufferSizeIteratorT buffer_sizes,
-    uint32_t num_buffers,
-    cudaStream_t stream = 0)
+  CUB_RUNTIME_FUNCTION static cudaError_t Batched(void *d_temp_storage,
+                                                  size_t &temp_storage_bytes,
+                                                  InputBufferIt input_buffer_it,
+                                                  OutputBufferIt output_buffer_it,
+                                                  BufferSizeIteratorT buffer_sizes,
+                                                  uint32_t num_buffers,
+                                                  cudaStream_t stream = 0)
   {
-    CUB_DETAIL_NVTX_RANGE_SCOPE_IF(d_temp_storage, "cub::DeviceMemcpy::Batched");
     static_assert(std::is_pointer<cub::detail::value_t<InputBufferIt>>::value,
                   "DeviceMemcpy::Batched only supports copying of memory buffers."
                   "Please consider using DeviceCopy::Batched instead.");
@@ -189,20 +186,19 @@ struct DeviceMemcpy
     // IDIV_CEIL(num_buffers, 64)
     using BlockOffsetT = uint32_t;
 
-    return detail::DispatchBatchMemcpy<
-      InputBufferIt,
-      OutputBufferIt,
-      BufferSizeIteratorT,
-      BufferOffsetT,
-      BlockOffsetT,
-      detail::DeviceBatchMemcpyPolicy<BufferOffsetT, BlockOffsetT>,
-      true>::Dispatch(d_temp_storage,
-                      temp_storage_bytes,
-                      input_buffer_it,
-                      output_buffer_it,
-                      buffer_sizes,
-                      num_buffers,
-                      stream);
+    return detail::DispatchBatchMemcpy<InputBufferIt,
+                                       OutputBufferIt,
+                                       BufferSizeIteratorT,
+                                       BufferOffsetT,
+                                       BlockOffsetT,
+                                       detail::DeviceBatchMemcpyPolicy<BufferOffsetT, BlockOffsetT>,
+                                       true>::Dispatch(d_temp_storage,
+                                                       temp_storage_bytes,
+                                                       input_buffer_it,
+                                                       output_buffer_it,
+                                                       buffer_sizes,
+                                                       num_buffers,
+                                                       stream);
   }
 };
 

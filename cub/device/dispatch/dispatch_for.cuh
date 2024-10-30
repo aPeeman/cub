@@ -87,23 +87,23 @@ struct has_unique_value_overload<
   Value,
   Fn,
   typename ::cuda::std::enable_if<
-              !::cuda::std::is_reference<first_parameter_t<Fn>>::value &&
+              !::cuda::std::is_reference<first_parameter_t<Fn>>::value && 
               ::cuda::std::is_convertible<Value, first_parameter_t<Fn>
              >::value>::type>
     : ::cuda::std::true_type
 {};
 
 // For trivial types, foreach is not allowed to copy values, even if those are trivially copyable.
-// This can be observable if the unary operator takes parameter by reference and modifies it or uses address.
-// The trait below checks if the freedom to copy trivial types can be regained.
+// This can be observable if the unary operator takes parameter by reference and modifies it or uses address. 
+// The trait below checks if the freedom to copy trivial types can be regained. 
 template <typename Value, typename Fn>
-using can_regain_copy_freedom =
+using can_regain_copy_freedom = 
   ::cuda::std::integral_constant<
     bool,
-    ::cuda::std::is_trivially_constructible<Value>::value &&
-    ::cuda::std::is_trivially_copy_assignable<Value>::value &&
-    :: cuda::std::is_trivially_move_assignable<Value>::value &&
-    ::cuda::std::is_trivially_destructible<Value>::value &&
+    ::cuda::std::is_trivially_constructible<Value>::value && 
+    ::cuda::std::is_trivially_copy_assignable<Value>::value && 
+    :: cuda::std::is_trivially_move_assignable<Value>::value && 
+    ::cuda::std::is_trivially_destructible<Value>::value && 
     has_unique_value_overload<Value, Fn>::value>;
 // clang-format on
 
@@ -142,9 +142,9 @@ __launch_bounds__(ChainedPolicyT::ActivePolicy::for_policy_t::block_threads) //
   constexpr auto block_threads  = active_policy_t::block_threads;
   constexpr auto items_per_tile = active_policy_t::items_per_thread * block_threads;
 
-  const auto tile_base     = static_cast<OffsetT>(blockIdx.x) * items_per_tile;
-  const auto num_remaining = num_items - tile_base;
-  const auto items_in_tile = static_cast<OffsetT>(num_remaining < items_per_tile ? num_remaining : items_per_tile);
+  const auto tile_base      = static_cast<OffsetT>(blockIdx.x) * items_per_tile;
+  const auto num_remaining  = num_items - tile_base;
+  const auto items_in_tile  = static_cast<OffsetT>(num_remaining < items_per_tile ? num_remaining : items_per_tile);
 
   if (items_in_tile == items_per_tile)
   {

@@ -42,7 +42,6 @@
 #include <cub/util_device.cuh>
 #include <cub/util_math.cuh>
 #include <cub/util_namespace.cuh>
-#include <cub/util_vsmem.cuh>
 
 #include <thrust/detail/integer_math.h>
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
@@ -73,15 +72,15 @@ struct dual_policy_agent_helper_t
  * size. This circumstance needs to be respected when determining whether the fallback policy for large user types is
  * applicable: we must either use the fallback for both or for none of the two agents.
  */
-template <typename DefaultPolicyT,
-          typename KeyInputIteratorT,
-          typename ValueInputIteratorT,
-          typename KeyIteratorT,
-          typename ValueIteratorT,
-          typename OffsetT,
-          typename CompareOpT,
-          typename KeyT,
-          typename ValueT>
+template < typename DefaultPolicyT,
+           typename KeyInputIteratorT,
+           typename ValueInputIteratorT,
+           typename KeyIteratorT,
+           typename ValueIteratorT,
+           typename OffsetT,
+           typename CompareOpT,
+           typename KeyT,
+           typename ValueT>
 class merge_sort_vsmem_helper_t
 {
 private:
@@ -116,7 +115,7 @@ private:
     OffsetT,
     CompareOpT,
     KeyT,
-    ValueT>;
+    ValueT >;
   using default_merge_agent_t  = typename merge_helper_t::default_agent_t;
   using fallback_merge_agent_t = typename merge_helper_t::fallback_agent_t;
 

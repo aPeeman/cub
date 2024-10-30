@@ -43,41 +43,47 @@
 #include <cub/warp/warp_merge_sort.cuh>
 #include <cub/warp/warp_store.cuh>
 
+#include <nv/target>
+
 #include <thrust/system/cuda/detail/core/util.h>
 
-#include <cuda/std/cstdlib>
-
-#include <nv/target>
 
 CUB_NAMESPACE_BEGIN
 
-template <int WARP_THREADS_ARG,
-          int ITEMS_PER_THREAD_ARG,
-          cub::WarpLoadAlgorithm LOAD_ALGORITHM_ARG   = cub::WARP_LOAD_DIRECT,
-          cub::CacheLoadModifier LOAD_MODIFIER_ARG    = cub::LOAD_LDG,
-          cub::WarpStoreAlgorithm STORE_ALGORITHM_ARG = cub::WARP_STORE_DIRECT>
+
+template <
+  int                      WARP_THREADS_ARG,
+  int                      ITEMS_PER_THREAD_ARG,
+  cub::WarpLoadAlgorithm   LOAD_ALGORITHM_ARG   = cub::WARP_LOAD_DIRECT,
+  cub::CacheLoadModifier   LOAD_MODIFIER_ARG    = cub::LOAD_LDG,
+  cub::WarpStoreAlgorithm  STORE_ALGORITHM_ARG  = cub::WARP_STORE_DIRECT>
 struct AgentSubWarpMergeSortPolicy
 {
-  static constexpr int WARP_THREADS     = WARP_THREADS_ARG;
-  static constexpr int ITEMS_PER_THREAD = ITEMS_PER_THREAD_ARG;
-  static constexpr int ITEMS_PER_TILE   = WARP_THREADS * ITEMS_PER_THREAD;
+  static constexpr int WARP_THREADS       = WARP_THREADS_ARG;
+  static constexpr int ITEMS_PER_THREAD   = ITEMS_PER_THREAD_ARG;
+  static constexpr int ITEMS_PER_TILE     = WARP_THREADS * ITEMS_PER_THREAD;
 
-  static constexpr cub::WarpLoadAlgorithm LOAD_ALGORITHM   = LOAD_ALGORITHM_ARG;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER    = LOAD_MODIFIER_ARG;
-  static constexpr cub::WarpStoreAlgorithm STORE_ALGORITHM = STORE_ALGORITHM_ARG;
+  static constexpr cub::WarpLoadAlgorithm  LOAD_ALGORITHM   = LOAD_ALGORITHM_ARG;
+  static constexpr cub::CacheLoadModifier  LOAD_MODIFIER    = LOAD_MODIFIER_ARG;
+  static constexpr cub::WarpStoreAlgorithm STORE_ALGORITHM  = STORE_ALGORITHM_ARG;
 };
 
-template <int BLOCK_THREADS_ARG, typename SmallPolicy, typename MediumPolicy>
+template <int BLOCK_THREADS_ARG,
+          typename SmallPolicy,
+          typename MediumPolicy>
 struct AgentSmallAndMediumSegmentedSortPolicy
 {
   static constexpr int BLOCK_THREADS = BLOCK_THREADS_ARG;
   using SmallPolicyT                 = SmallPolicy;
   using MediumPolicyT                = MediumPolicy;
 
-  static constexpr int SEGMENTS_PER_MEDIUM_BLOCK = BLOCK_THREADS / MediumPolicyT::WARP_THREADS;
+  static constexpr int SEGMENTS_PER_MEDIUM_BLOCK = BLOCK_THREADS /
+                                                   MediumPolicyT::WARP_THREADS;
 
-  static constexpr int SEGMENTS_PER_SMALL_BLOCK = BLOCK_THREADS / SmallPolicyT::WARP_THREADS;
+  static constexpr int SEGMENTS_PER_SMALL_BLOCK = BLOCK_THREADS /
+                                                  SmallPolicyT::WARP_THREADS;
 };
+
 
 /**
  * @brief AgentSubWarpSort implements a sub-warp merge sort.
@@ -103,18 +109,39 @@ struct AgentSmallAndMediumSegmentedSortPolicy
  * @tparam OffsetT
  *   Signed integer type for global offsets
  */
-template <bool IS_DESCENDING, typename PolicyT, typename KeyT, typename ValueT, typename OffsetT>
+template <bool IS_DESCENDING,
+          typename PolicyT,
+          typename KeyT,
+          typename ValueT,
+          typename OffsetT>
 class AgentSubWarpSort
 {
-  using traits           = detail::radix::traits_t<KeyT>;
+  using traits = detail::radix::traits_t<KeyT>;
   using bit_ordered_type = typename traits::bit_ordered_type;
 
   struct BinaryOpT
   {
     template <typename T>
-    _CCCL_DEVICE bool operator()(T lhs, T rhs) const noexcept
+    _CCCL_DEVICE bool operator()(T lhs, T rhs)
     {
-      _CCCL_IF_CONSTEXPR (IS_DESCENDING)
+      return this->impl(lhs, rhs);
+    }
+
+#if defined(__CUDA_FP16_TYPES_EXIST__)
+    _CCCL_DEVICE bool operator()(__half lhs, __half rhs)
+    {
+      // Need to explicitly cast to float for SM <= 52.
+      NV_IF_TARGET(NV_PROVIDES_SM_53,
+                   (return this->impl(lhs, rhs);),
+                   (return this->impl(__half2float(lhs), __half2float(rhs));));
+    }
+#endif
+
+  private:
+    template <typename T>
+    _CCCL_DEVICE bool impl(T lhs, T rhs)
+    {
+      if (IS_DESCENDING)
       {
         return lhs > rhs;
       }
@@ -122,33 +149,18 @@ class AgentSubWarpSort
       {
         return lhs < rhs;
       }
-      _LIBCUDACXX_UNREACHABLE();
     }
-
-#if defined(__CUDA_FP16_TYPES_EXIST__)
-    _CCCL_DEVICE bool operator()(__half lhs, __half rhs) const noexcept
-    {
-      // Need to explicitly cast to float for SM <= 52.
-      _CCCL_IF_CONSTEXPR (IS_DESCENDING)
-      {
-        NV_IF_TARGET(NV_PROVIDES_SM_53, (return __hgt(lhs, rhs);), (return __half2float(lhs) > __half2float(rhs);));
-      }
-      else
-      {
-        NV_IF_TARGET(NV_PROVIDES_SM_53, (return __hlt(lhs, rhs);), (return __half2float(lhs) < __half2float(rhs);));
-      }
-      _LIBCUDACXX_UNREACHABLE();
-    }
-#endif // __CUDA_FP16_TYPES_EXIST__
   };
 
 #if defined(__CUDA_FP16_TYPES_EXIST__)
   _CCCL_DEVICE static bool equal(__half lhs, __half rhs)
   {
     // Need to explicitly cast to float for SM <= 52.
-    NV_IF_TARGET(NV_PROVIDES_SM_53, (return __heq(lhs, rhs);), (return __half2float(lhs) == __half2float(rhs);));
+    NV_IF_TARGET(NV_PROVIDES_SM_53,
+                 (return lhs == rhs;),
+                 (return __half2float(lhs) == __half2float(rhs);));
   }
-#endif // __CUDA_FP16_TYPES_EXIST__
+#endif
 
   template <typename T>
   _CCCL_DEVICE static bool equal(T lhs, T rhs)
@@ -170,27 +182,40 @@ class AgentSubWarpSort
     // LOWEST   -> -nan          = 11...11b -> TwiddleIn ->  0 = 00...00b
 
     // Segmented sort doesn't support custom types at the moment.
-    bit_ordered_type default_key_bits = IS_DESCENDING ? traits::min_raw_binary_key(detail::identity_decomposer_t{})
-                                                      : traits::max_raw_binary_key(detail::identity_decomposer_t{});
-    return reinterpret_cast<KeyT&>(default_key_bits);
+    bit_ordered_type default_key_bits = IS_DESCENDING
+                                      ? traits::min_raw_binary_key(detail::identity_decomposer_t{})
+                                      : traits::max_raw_binary_key(detail::identity_decomposer_t{});
+    return reinterpret_cast<KeyT &>(default_key_bits);
   }
 
 public:
   static constexpr bool KEYS_ONLY = std::is_same<ValueT, cub::NullType>::value;
 
-  using WarpMergeSortT = WarpMergeSort<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::WARP_THREADS, ValueT>;
+  using WarpMergeSortT =
+    WarpMergeSort<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::WARP_THREADS, ValueT>;
 
-  using KeysLoadItT  = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<PolicyT, const KeyT*>::type;
-  using ItemsLoadItT = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<PolicyT, const ValueT*>::type;
+  using KeysLoadItT = typename THRUST_NS_QUALIFIER::cuda_cub::core::
+    LoadIterator<PolicyT, const KeyT *>::type;
+  using ItemsLoadItT = typename THRUST_NS_QUALIFIER::cuda_cub::core::
+    LoadIterator<PolicyT, const ValueT *>::type;
 
-  using WarpLoadKeysT = cub::WarpLoad<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
-  using WarpLoadItemsT =
-    cub::WarpLoad<ValueT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
+  using WarpLoadKeysT  = cub::WarpLoad<KeyT,
+                                      PolicyT::ITEMS_PER_THREAD,
+                                      PolicyT::LOAD_ALGORITHM,
+                                      PolicyT::WARP_THREADS>;
+  using WarpLoadItemsT = cub::WarpLoad<ValueT,
+                                       PolicyT::ITEMS_PER_THREAD,
+                                       PolicyT::LOAD_ALGORITHM,
+                                       PolicyT::WARP_THREADS>;
 
-  using WarpStoreKeysT =
-    cub::WarpStore<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::STORE_ALGORITHM, PolicyT::WARP_THREADS>;
-  using WarpStoreItemsT =
-    cub::WarpStore<ValueT, PolicyT::ITEMS_PER_THREAD, PolicyT::STORE_ALGORITHM, PolicyT::WARP_THREADS>;
+  using WarpStoreKeysT  = cub::WarpStore<KeyT,
+                                         PolicyT::ITEMS_PER_THREAD,
+                                         PolicyT::STORE_ALGORITHM,
+                                         PolicyT::WARP_THREADS>;
+  using WarpStoreItemsT = cub::WarpStore<ValueT,
+                                         PolicyT::ITEMS_PER_THREAD,
+                                         PolicyT::STORE_ALGORITHM,
+                                         PolicyT::WARP_THREADS>;
 
   union _TempStorage
   {
@@ -202,44 +227,52 @@ public:
   };
 
   /// Alias wrapper allowing storage to be unioned
-  struct TempStorage : Uninitialized<_TempStorage>
-  {};
+  struct TempStorage : Uninitialized<_TempStorage> {};
 
-  _TempStorage& storage;
+  _TempStorage &storage;
 
-  _CCCL_DEVICE _CCCL_FORCEINLINE explicit AgentSubWarpSort(TempStorage& temp_storage)
-      : storage(temp_storage.Alias())
-  {}
+  _CCCL_DEVICE _CCCL_FORCEINLINE
+  explicit AgentSubWarpSort(TempStorage &temp_storage)
+    : storage(temp_storage.Alias())
+  {
+  }
 
-  _CCCL_DEVICE _CCCL_FORCEINLINE void ProcessSegment(
-    int segment_size, KeysLoadItT keys_input, KeyT* keys_output, ItemsLoadItT values_input, ValueT* values_output)
+
+  _CCCL_DEVICE _CCCL_FORCEINLINE
+  void ProcessSegment(int segment_size,
+                      KeysLoadItT keys_input,
+                      KeyT *keys_output,
+                      ItemsLoadItT values_input,
+                      ValueT *values_output)
   {
     WarpMergeSortT warp_merge_sort(storage.sort);
 
     if (segment_size < 3)
     {
-      ShortCircuit(
-        warp_merge_sort.get_linear_tid(),
-        segment_size,
-        keys_input,
-        keys_output,
-        values_input,
-        values_output,
-        BinaryOpT{});
+      ShortCircuit(warp_merge_sort.get_linear_tid(),
+                   segment_size,
+                   keys_input,
+                   keys_output,
+                   values_input,
+                   values_output,
+                   BinaryOpT{});
     }
     else
     {
       KeyT keys[PolicyT::ITEMS_PER_THREAD];
       ValueT values[PolicyT::ITEMS_PER_THREAD];
 
-      KeyT oob_default = AgentSubWarpSort::get_oob_default(Int2Type<std::is_same<bool, KeyT>::value>{});
+      KeyT oob_default =
+        AgentSubWarpSort::get_oob_default(Int2Type<std::is_same<bool, KeyT>::value>{});
 
-      WarpLoadKeysT(storage.load_keys).Load(keys_input, keys, segment_size, oob_default);
+      WarpLoadKeysT(storage.load_keys)
+        .Load(keys_input, keys, segment_size, oob_default);
       WARP_SYNC(warp_merge_sort.get_member_mask());
 
       if (!KEYS_ONLY)
       {
-        WarpLoadItemsT(storage.load_items).Load(values_input, values, segment_size);
+        WarpLoadItemsT(storage.load_items)
+          .Load(values_input, values, segment_size);
 
         WARP_SYNC(warp_merge_sort.get_member_mask());
       }
@@ -252,7 +285,8 @@ public:
       if (!KEYS_ONLY)
       {
         WARP_SYNC(warp_merge_sort.get_member_mask());
-        WarpStoreItemsT(storage.store_items).Store(values_output, values, segment_size);
+        WarpStoreItemsT(storage.store_items)
+          .Store(values_output, values, segment_size);
       }
     }
   }
@@ -263,14 +297,13 @@ private:
    * Only the first thread of a virtual warp is used for soring.
    */
   template <typename CompareOpT>
-  _CCCL_DEVICE _CCCL_FORCEINLINE void ShortCircuit(
-    unsigned int linear_tid,
-    OffsetT segment_size,
-    KeysLoadItT keys_input,
-    KeyT* keys_output,
-    ItemsLoadItT values_input,
-    ValueT* values_output,
-    CompareOpT binary_op)
+  _CCCL_DEVICE _CCCL_FORCEINLINE void ShortCircuit(unsigned int linear_tid,
+                                               OffsetT segment_size,
+                                               KeysLoadItT keys_input,
+                                               KeyT *keys_output,
+                                               ItemsLoadItT values_input,
+                                               ValueT *values_output,
+                                               CompareOpT binary_op)
   {
     if (segment_size == 1)
     {
